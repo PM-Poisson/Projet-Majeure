@@ -1,41 +1,99 @@
 #include "map.hpp"
+#include <glad/glad.h>
 #include <algorithm>
+#include <stdexcept>
 #include <cmath>
 
-float Heightmap::sample(float x, float y) const {
-    // Clamp aux bords
-    x = std::clamp(x, 0.0f, (float)(width  - 1));
-    y = std::clamp(y, 0.0f, (float)(height - 1));
-
-    int   x0 = (int)x, y0 = (int)y;
-    int   x1 = std::min(x0 + 1, width  - 1);
-    int   y1 = std::min(y0 + 1, height - 1);
-    float tx = x - (float)x0;
-    float ty = y - (float)y0;
-
-    float v00 = at(x0, y0);
-    float v10 = at(x1, y0);
-    float v01 = at(x0, y1);
-    float v11 = at(x1, y1);
-
-    // Interpolation bilinéaire
-    return (1-tx)*(1-ty)*v00 + tx*(1-ty)*v10
-          +(1-tx)*   ty *v01 + tx*   ty *v11;
+Heightmap::Heightmap(int width, int height)
+    : m_width(width), m_height(height), m_data(width * height, 0.0f)
+{
+    // Cree la texture GPU R32F (format float simple precision)
+    glGenTextures(1, &m_textureID);
+    glBindTexture(GL_TEXTURE_2D, m_textureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F,
+                 m_width, m_height, 0,
+                 GL_RED, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-// glm::vec3 Heightmap::normalAt(int x, int y, float verticalScale) const {
-//     // Différences finies centrées (ou unilatérales aux bords)
-//     int xl = std::max(x - 1, 0);
-//     int xr = std::min(x + 1, width  - 1);
-//     int yd = std::max(y - 1, 0);
-//     int yu = std::min(y + 1, height - 1);
+Heightmap::~Heightmap() {
+    if (m_textureID) glDeleteTextures(1, &m_textureID);
+}
 
-//     float hL = at(xl, y)  * verticalScale;
-//     float hR = at(xr, y)  * verticalScale;
-//     float hD = at(x,  yd) * verticalScale;
-//     float hU = at(x,  yu) * verticalScale;
+// ---------------------------------------------------------------------------
+// Acces CPU
+// ---------------------------------------------------------------------------
 
-//     // Gradient → normale
-//     glm::vec3 n = glm::normalize(glm::vec3(hL - hR, 2.0f, hD - hU));
-//     return n;
-// }
+float Heightmap::get(int x, int z) const {
+    x = std::clamp(x, 0, m_width  - 1);
+    z = std::clamp(z, 0, m_height - 1);
+    return m_data[idx(x, z)];
+}
+
+void Heightmap::set(int x, int z, float value) {
+    if (x < 0 || x >= m_width || z < 0 || z >= m_height) return;
+    m_data[idx(x, z)] = value;
+}
+
+float Heightmap::getInterpolated(float x, float z) const {
+    int   x0 = (int)std::floor(x),  z0 = (int)std::floor(z);
+    int   x1 = x0 + 1,              z1 = z0 + 1;
+    float tx  = x - (float)x0,      tz = z - (float)z0;
+
+    float h00 = get(x0, z0), h10 = get(x1, z0);
+    float h01 = get(x0, z1), h11 = get(x1, z1);
+
+    // Interpolation bilineaire
+    float h0 = h00 + tx * (h10 - h00);
+    float h1 = h01 + tx * (h11 - h01);
+    return h0 + tz * (h1 - h0);
+}
+
+// ---------------------------------------------------------------------------
+// Calcul des normales (differences finies centrales)
+// ---------------------------------------------------------------------------
+
+glm::vec3 Heightmap::getNormal(int x, int z) const {
+    float scale = 1.0f;   // echelle horizontale du terrain en world units
+    float hL = get(x - 1, z);
+    float hR = get(x + 1, z);
+    float hD = get(x, z - 1);
+    float hU = get(x, z + 1);
+
+    glm::vec3 n(
+        (hL - hR) / (2.0f * scale),
+        1.0f,
+        (hD - hU) / (2.0f * scale)
+    );
+    return glm::normalize(n);
+}
+
+// ---------------------------------------------------------------------------
+// Synchronisation GPU
+// ---------------------------------------------------------------------------
+
+void Heightmap::uploadToGPU() {
+    glBindTexture(GL_TEXTURE_2D, m_textureID);
+    glTexSubImage2D(GL_TEXTURE_2D, 0,
+                    0, 0, m_width, m_height,
+                    GL_RED, GL_FLOAT, m_data.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void Heightmap::downloadFromGPU() {
+    glBindTexture(GL_TEXTURE_2D, m_textureID);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, m_data.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Classification roche / mer
+// ---------------------------------------------------------------------------
+
+bool Heightmap::isRock(int x, int z, float seaLevel) const {
+    return get(x, z) > seaLevel;
+}
