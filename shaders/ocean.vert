@@ -1,31 +1,33 @@
-#version 330 core
+#version 430 core
 
-// --- Entrées du VBO ---
-layout(location = 0) in vec3 position;
-layout(location = 1) in vec3 normal_in;
-layout(location = 2) in vec3 color_in;
-layout(location = 3) in vec2 uv_in;
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aUV;
 
-// --- Uniformes ---
-uniform mat4 camera_modelview;
-uniform mat4 camera_projection;
-uniform float time;
+uniform mat4  uModel;
+uniform mat4  uView;
+uniform mat4  uProjection;
+uniform float uTime;
+uniform float uWorldSize;
 
-// --- Sorties vers le fragment shader ---
-out float height;
+out float vWaveHeight;
+out vec2  vUV;
+out vec3  vWorldPos;
 
-void main()
-{
-    // Déformation sin/cos en Z
+void main() {
+    vec3 pos = aPosition;
+
+    // Superposition de 3 vagues de Gerstner simplifiees
     float wave = 0.0;
-    wave += 0.25 * sin(3.0 * position.x + time * 1.2);
-    wave += 0.15 * cos(5.0 * position.y + time * 0.8);
-    wave += 0.10 * sin(2.0 * position.x + 4.0 * position.y + time);
+    wave += 1.2 * sin(0.018 * pos.x + uTime * 0.8);
+    wave += 0.7 * cos(0.025 * pos.z + uTime * 1.1);
+    wave += 0.4 * sin(0.012 * pos.x + 0.020 * pos.z + uTime * 0.6);
 
-    vec3 pos = position;
-    pos.z += wave;
+    pos.y += wave;
 
-    height = wave; // transmis au fragment shader pour la couleur
+    vWaveHeight = wave;
+    vUV         = aUV;
+    vWorldPos   = (uModel * vec4(pos, 1.0)).xyz;
 
-    gl_Position = camera_projection * camera_modelview * vec4(pos, 1.0);
+    gl_Position = uProjection * uView * uModel * vec4(pos, 1.0);
 }
