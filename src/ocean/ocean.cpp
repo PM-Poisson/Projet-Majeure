@@ -1,111 +1,89 @@
-/**Projet majeure 4ETI - CPE Lyon - 2025/2026 */
-
-#include <GL/glew.h>
-#include "../UI/myWidgetGL.hpp"
 #include "ocean.hpp"
+#include <glm/gtc/matrix_transform.hpp>
+#include <vector>
 
-#include "../lib/opengl/glutils.hpp"
-#include "../lib/interface/camera_matrices.hpp"
-#include "../lib/mesh/mesh_io.hpp"
-#include "../lib/mesh/triangle_index.hpp"
+Ocean::Ocean() {}
 
-#include <cmath>
-#include <string>
+void Ocean::init() {
+    m_shader.load("shaders/ocean.vert", "shaders/ocean.frag");
+    buildGrid();
+}
 
-// ------------------------------------------------------------------ //
-//  load_scene : appelé une seule fois au démarrage                    //
-// ------------------------------------------------------------------ //
-void scene::load_scene()
-{
-    // Shader
-    texture_default   = load_texture_file("data/white.jpg");
-    shader_program_id = read_shader("shaders/ocean.vert",
-                                    "shaders/ocean.frag");
+// ---------------------------------------------------------------------------
+// Grille reguliere XZ, Y = 0
+// Format sommet : position(3) + normale(3) + uv(2) = 8 floats
+// (identique a Mesh::upload attendu par votre renderer/mesh)
+// ---------------------------------------------------------------------------
+void Ocean::buildGrid() {
+    const int   N     = gridResolution;
+    const float half  = worldSize * 0.5f;
+    const float step  = worldSize / float(N - 1);
 
-    // --- Génération de la grille océan (CPU, statique) ---
-    const int   N    = 50;      // résolution 50x50
-    const float size = 20.0f;   // taille du plan en unités monde
+    std::vector<float>        vertices;
+    std::vector<unsigned int> indices;
 
-    // Sommets + UV
-    for(int i = 0; i < N; ++i)
-    {
-        for(int j = 0; j < N; ++j)
-        {
-            float u = i / float(N - 1);
-            float v = j / float(N - 1);
+    vertices.reserve(N * N * 8);
+    indices.reserve((N - 1) * (N - 1) * 6);
 
-            cpe::vec3 p;
-            p.x() = size * (u - 0.5f);
-            p.y() = size * (v - 0.5f);
-            p.z() = 0.0f;
+    for (int z = 0; z < N; ++z) {
+        for (int x = 0; x < N; ++x) {
+            float px = -half + x * step;
+            float pz = -half + z * step;
 
-            ocean_mesh.add_vertex(p);
-            ocean_mesh.add_texture_coord(cpe::vec2(u, v));
+            float u = float(x) / float(N - 1);
+            float v = float(z) / float(N - 1);
+
+            // position
+            vertices.push_back(px);
+            vertices.push_back(0.0f);   // Y = 0, deformation dans le vertex shader
+            vertices.push_back(pz);
+            // normale (vers le haut par defaut, recalculee dans le shader)
+            vertices.push_back(0.0f);
+            vertices.push_back(1.0f);
+            vertices.push_back(0.0f);
+            // uv
+            vertices.push_back(u);
+            vertices.push_back(v);
         }
     }
 
-    // Triangles (deux par cellule)
-    for(int i = 0; i < N - 1; ++i)
-    {
-        for(int j = 0; j < N - 1; ++j)
-        {
-            int k = i * N + j;
-            //   k --- k+1
-            //   |  \   |
-            //  k+N - k+N+1
-            ocean_mesh.add_triangle_index(cpe::triangle_index(k,     k + 1,   k + N));
-            ocean_mesh.add_triangle_index(cpe::triangle_index(k + 1, k + N + 1, k + N));
+    for (int z = 0; z < N - 1; ++z) {
+        for (int x = 0; x < N - 1; ++x) {
+            unsigned int tl = z * N + x;
+            unsigned int tr = tl + 1;
+            unsigned int bl = tl + N;
+            unsigned int br = bl + 1;
+
+            indices.push_back(tl); indices.push_back(bl); indices.push_back(tr);
+            indices.push_back(tr); indices.push_back(bl); indices.push_back(br);
         }
     }
 
-    // Remplir couleurs/normales par défaut (requis par fill_vbo)
-    ocean_mesh.fill_empty_field_by_default();
-
-    // Envoi au GPU (une seule fois)
-    ocean_mesh_opengl.fill_vbo(ocean_mesh);
-
-    // Démarrage du timer
-    timer.start();
+    m_mesh.upload(vertices, indices);
 }
 
-// ------------------------------------------------------------------ //
-//  draw_scene : appelé à chaque frame                                 //
-// ------------------------------------------------------------------ //
-void scene::draw_scene()
+// ---------------------------------------------------------------------------
+// Draw
+// ---------------------------------------------------------------------------
+void Ocean::draw(const glm::mat4& view,
+                 const glm::mat4& proj,
+                 float            time)
 {
-    glUseProgram(shader_program_id);                                        PRINT_OPENGL_ERROR();
+    m_shader.use();
 
-    // Matrices caméra
-    cpe::camera_matrices const& cam = pwidget->camera();
-    glUniformMatrix4fv(get_uni_loc(shader_program_id, "camera_modelview"),
-                       1, false, cam.modelview.pointer());                  PRINT_OPENGL_ERROR();
-    glUniformMatrix4fv(get_uni_loc(shader_program_id, "camera_projection"),
-                       1, false, cam.projection.pointer());                 PRINT_OPENGL_ERROR();
-    glUniformMatrix4fv(get_uni_loc(shader_program_id, "normal_matrix"),
-                       1, false, cam.normal.pointer());                     PRINT_OPENGL_ERROR();
+    glm::mat4 model = glm::mat4(1.0f);
+    m_shader.setMat4 ("uModel",      model);
+    m_shader.setMat4 ("uView",       view);
+    m_shader.setMat4 ("uProjection", proj);
+    m_shader.setFloat("uTime",       time);
+    m_shader.setFloat("uWorldSize",  worldSize);
 
-    // Temps en secondes pour l'animation
-    float t = timer.elapsed() / 1000.0f;
-    glUniform1f(get_uni_loc(shader_program_id, "time"), t);                 PRINT_OPENGL_ERROR();
+    // Transparence legere pour l'eau
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // Dessin
-    ocean_mesh_opengl.draw();                                               PRINT_OPENGL_ERROR();
-}
+    m_mesh.draw();
 
-// ------------------------------------------------------------------ //
-//  Boilerplate                                                         //
-// ------------------------------------------------------------------ //
-scene::scene()
-    : shader_program_id(0)
-    , pwidget(nullptr)
-{}
-
-GLuint scene::load_texture_file(std::string const& filename)
-{
-    return pwidget->load_texture_file(filename);
-}
-
-void scene::set_widget(myWidgetGL* widget_param)
-{
-    pwidget = widget_param;
+    glDisable(GL_BLEND);
+    m_shader.unuse();
 }

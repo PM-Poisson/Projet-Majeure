@@ -9,105 +9,82 @@
 #include <iostream>
 #include <memory>
 
-#include "terrain/terrain.hpp"
-#include "renderer/shader.hpp"
+#include "terrain/scene.hpp"   // IslandScene
+#include "ocean/ocean.hpp"     // Ocean
 #include "renderer/camera.hpp"
 
 // ---------------------------------------------------------------------------
-// Etat global de la fenetre / interaction
+// Etat global
 // ---------------------------------------------------------------------------
-
 struct AppState {
     int   width  = 1280;
     int   height = 720;
 
     Camera camera;
 
-    double lastMouseX = 0.0, lastMouseY = 0.0;
-    bool   firstMouse = true;
-    bool   rightButtonHeld = false;
+    double lastMouseX  = 0.0, lastMouseY = 0.0;
+    bool   firstMouse  = true;
+    bool   rightButton = false;
 
     float lastFrame = 0.0f;
     float deltaTime = 0.0f;
+    float time      = 0.0f;
 
-    // Parametres terrain (exposes dans ImGui)
-    TerrainParams terrainParams;
-    bool          regenerate = false;
-
-    // Affichage
-    bool wireframe = false;
+    IslandParams islandParams;
+    bool         regenerate  = false;
+    bool         wireframe   = false;
 };
 
-static AppState g_app;
+static AppState g;
 
 // ---------------------------------------------------------------------------
-// Callbacks GLFW
+// Callbacks
 // ---------------------------------------------------------------------------
-
-void framebufferSizeCallback(GLFWwindow*, int w, int h) {
-    g_app.width  = w;
-    g_app.height = h;
+void cbResize(GLFWwindow*, int w, int h) {
+    g.width = w; g.height = h;
     glViewport(0, 0, w, h);
 }
-
-void mouseButtonCallback(GLFWwindow*, int button, int action, int) {
-    if (button == GLFW_MOUSE_BUTTON_RIGHT)
-        g_app.rightButtonHeld = (action == GLFW_PRESS);
+void cbMouseBtn(GLFWwindow*, int btn, int action, int) {
+    if (btn == GLFW_MOUSE_BUTTON_RIGHT)
+        g.rightButton = (action == GLFW_PRESS);
 }
-
-void cursorPosCallback(GLFWwindow*, double xpos, double ypos) {
-    if (g_app.firstMouse) {
-        g_app.lastMouseX = xpos;
-        g_app.lastMouseY = ypos;
-        g_app.firstMouse = false;
-    }
-    float dx = (float)(xpos - g_app.lastMouseX);
-    float dy = (float)(ypos - g_app.lastMouseY);
-    g_app.lastMouseX = xpos;
-    g_app.lastMouseY = ypos;
-
-    // Ne pas passer les deltas a la camera si ImGui capture la souris
+void cbCursor(GLFWwindow*, double xp, double yp) {
+    if (g.firstMouse) { g.lastMouseX = xp; g.lastMouseY = yp; g.firstMouse = false; }
+    float dx = float(xp - g.lastMouseX);
+    float dy = float(yp - g.lastMouseY);
+    g.lastMouseX = xp; g.lastMouseY = yp;
     if (!ImGui::GetIO().WantCaptureMouse)
-        g_app.camera.onMouseMove(dx, dy, g_app.rightButtonHeld);
+        g.camera.onMouseMove(dx, dy, g.rightButton);
 }
-
-void scrollCallback(GLFWwindow*, double, double yOffset) {
+void cbScroll(GLFWwindow*, double, double yo) {
     if (!ImGui::GetIO().WantCaptureMouse)
-        g_app.camera.onMouseScroll((float)yOffset);
+        g.camera.onMouseScroll(float(yo));
 }
-
-void keyCallback(GLFWwindow* window, int key, int, int action, int) {
+void cbKey(GLFWwindow* win, int key, int, int action, int) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
-
+        glfwSetWindowShouldClose(win, true);
     if (key == GLFW_KEY_F && action == GLFW_PRESS)
-        g_app.camera.toggleMode();
-
+        g.camera.toggleMode();
     if (key == GLFW_KEY_TAB && action == GLFW_PRESS) {
-        g_app.wireframe = !g_app.wireframe;
-        glPolygonMode(GL_FRONT_AND_BACK, g_app.wireframe ? GL_LINE : GL_FILL);
+        g.wireframe = !g.wireframe;
+        glPolygonMode(GL_FRONT_AND_BACK, g.wireframe ? GL_LINE : GL_FILL);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Traitement du clavier en continu (appele chaque frame)
-// ---------------------------------------------------------------------------
-
-void processKeyboard(GLFWwindow* window) {
+void processKeys(GLFWwindow* win) {
     if (ImGui::GetIO().WantCaptureKeyboard) return;
-
-    bool fwd   = glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS;
-    bool back  = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
-    bool left  = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS;
-    bool right = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS;
-    bool up    = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
-    bool down  = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
-
-    g_app.camera.onKeyboard(fwd, back, left, right, up, down, g_app.deltaTime);
+    g.camera.onKeyboard(
+        glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS,
+        glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS,
+        glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS,
+        glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS,
+        glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS,
+        glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS,
+        g.deltaTime
+    );
 }
 
 // ---------------------------------------------------------------------------
-// Interface ImGui — panneau de controle du terrain
+// UI ImGui
 // ---------------------------------------------------------------------------
 
 void renderUI() {
@@ -115,157 +92,120 @@ void renderUI() {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(300, 400), ImGuiCond_Once);
-    ImGui::Begin("Terrain");
+    ImGui::SetNextWindowPos (ImVec2(10, 10),   ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(300, 340),  ImGuiCond_Once);
+    ImGui::Begin("Coastal Erosion");
 
-    ImGui::Text("Camera : %s  (F pour basculer)",
-                g_app.camera.mode() == Camera::Mode::Orbit ? "Orbite" : "FPS");
-    ImGui::Text("TAB : wireframe | clic droit : rotation");
+    ImGui::Text("Camera : %s  (F)",
+        g.camera.mode() == Camera::Mode::Orbit ? "Orbite" : "FPS");
+    ImGui::Text("TAB : wireframe  |  clic droit : rotation");
     ImGui::Separator();
 
-    TerrainParams& p = g_app.terrainParams;
-
-    ImGui::Text("Bruit");
-    ImGui::SliderFloat("Frequence",    &p.noiseFreq,    0.001f, 0.01f,  "%.4f");
-    ImGui::SliderInt  ("Octaves",      &p.octaves,      1, 10);
-    ImGui::SliderFloat("Lacunarite",   &p.lacunarity,   1.5f, 3.0f);
-    ImGui::SliderFloat("Gain",         &p.gain,         0.3f, 0.7f);
-    ImGui::SliderFloat("Domain warp",  &p.warpStrength, 0.0f, 3.0f);
-    ImGui::Separator();
-
-    ImGui::Text("Profil cotier");
-    ImGui::SliderFloat("Hauteur max",  &p.heightScale,  5.0f,  100.0f);
-    ImGui::SliderFloat("Niveau mer",   &p.seaLevel,    -10.0f,  10.0f);
-    ImGui::SliderFloat("Blend cote",   &p.coastBlend,   0.05f,  0.8f);
-    ImGui::SliderFloat("Offset cote",  &p.shoreOffset, -0.4f,   0.4f);
-    ImGui::Separator();
-
+    IslandParams& p = g.islandParams;
+    ImGui::SliderFloat("Hauteur max",   &p.heightScale,  5.0f,  80.0f);
+    ImGui::SliderFloat("Rayon ile",     &p.islandRadius, 0.1f,  0.6f);
+    ImGui::SliderFloat("Blend rivage",  &p.shoreBlend,   0.02f, 0.3f);
+    ImGui::SliderFloat("Freq bruit",    &p.noiseFreq,    0.001f,0.01f,"%.4f");
+    ImGui::SliderInt  ("Octaves",       &p.octaves,      1, 10);
+    ImGui::SliderFloat("Domain warp",   &p.warpStrength, 0.0f,  3.0f);
     ImGui::InputScalar("Seed", ImGuiDataType_U32, &p.seed);
 
     if (ImGui::Button("Regenerer", ImVec2(-1, 0)))
-        g_app.regenerate = true;
+        g.regenerate = true;
 
     ImGui::Separator();
     ImGui::Text("FPS : %.1f", ImGui::GetIO().Framerate);
-
     ImGui::End();
+
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
 // ---------------------------------------------------------------------------
-// Point d'entree
+// Main
 // ---------------------------------------------------------------------------
-
 int main() {
-    // ---- Init GLFW ----
-    if (!glfwInit()) {
-        std::cerr << "Echec init GLFW\n";
-        return -1;
-    }
+    if (!glfwInit()) { std::cerr << "Echec GLFW\n"; return -1; }
+
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(
-        g_app.width, g_app.height,
-        "Coastal Erosion", nullptr, nullptr);
-    if (!window) {
-        std::cerr << "Echec creation fenetre GLFW\n";
-        glfwTerminate();
-        return -1;
-    }
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);  // vsync
+    GLFWwindow* win = glfwCreateWindow(g.width, g.height,
+                                       "Coastal Erosion", nullptr, nullptr);
+    if (!win) { std::cerr << "Echec fenetre\n"; glfwTerminate(); return -1; }
+    glfwMakeContextCurrent(win);
+    glfwSwapInterval(1);
 
-    // ---- Init GLAD ----
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        std::cerr << "Echec init GLAD\n";
-        return -1;
+        std::cerr << "Echec GLAD\n"; return -1;
     }
     std::cout << "OpenGL " << glGetString(GL_VERSION) << "\n";
 
-    // ---- Callbacks ----
-    glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
-    glfwSetMouseButtonCallback    (window, mouseButtonCallback);
-    glfwSetCursorPosCallback      (window, cursorPosCallback);
-    glfwSetScrollCallback         (window, scrollCallback);
-    glfwSetKeyCallback            (window, keyCallback);
+    glfwSetFramebufferSizeCallback(win, cbResize);
+    glfwSetMouseButtonCallback    (win, cbMouseBtn);
+    glfwSetCursorPosCallback      (win, cbCursor);
+    glfwSetScrollCallback         (win, cbScroll);
+    glfwSetKeyCallback            (win, cbKey);
 
-    // ---- Init ImGui ----
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplGlfw_InitForOpenGL(win, true);
     ImGui_ImplOpenGL3_Init("#version 430");
 
-    // ---- Etat OpenGL ----
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glViewport(0, 0, g_app.width, g_app.height);
+    glViewport(0, 0, g.width, g.height);
 
-    // ---- Shader terrain ----
-    Shader terrainShader;
-    if (!terrainShader.load("shaders/terrain.vert", "shaders/terrain.frag")) {
-        std::cerr << "Echec chargement shader terrain\n";
-        return -1;
-    }
+    // --- Init scenes ---
+    Ocean ocean;
+    ocean.worldSize = 200.0f;
+    ocean.init();
 
-    // ---- Generation du terrain ----
-    auto terrain = std::make_unique<TerrainGenerator>(g_app.terrainParams);
-    terrain->generate();
+    IslandScene island;
+    island.init(g.islandParams);
 
-    // ---- Boucle principale ----
-    while (!glfwWindowShouldClose(window)) {
-        float currentFrame = (float)glfwGetTime();
-        g_app.deltaTime    = currentFrame - g_app.lastFrame;
-        g_app.lastFrame    = currentFrame;
+    const glm::vec3 lightDir = glm::normalize(glm::vec3(0.6f, 1.0f, 0.4f));
+
+    // --- Boucle principale ---
+    while (!glfwWindowShouldClose(win)) {
+        float now    = float(glfwGetTime());
+        g.deltaTime  = now - g.lastFrame;
+        g.lastFrame  = now;
+        g.time       = now;
 
         glfwPollEvents();
-        processKeyboard(window);
+        processKeys(win);
 
-        // Regeneration si demandee depuis ImGui
-        if (g_app.regenerate) {
-            terrain->regenerate(g_app.terrainParams);
-            g_app.regenerate = false;
+        if (g.regenerate) {
+            island.regenerate(g.islandParams);
+            g.regenerate = false;
         }
 
-        // ---- Rendu ----
-        glClearColor(0.53f, 0.73f, 0.87f, 1.0f);  // ciel bleu clair
+        glClearColor(0.52f, 0.72f, 0.88f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        float aspect = (float)g_app.width / (float)g_app.height;
+        float     aspect = float(g.width) / float(g.height);
+        glm::mat4 view   = g.camera.viewMatrix();
+        glm::mat4 proj   = g.camera.projectionMatrix(aspect);
+        glm::vec3 camPos = g.camera.position();
 
-        glm::mat4 model = glm::mat4(1.0f);
-        glm::mat4 view  = g_app.camera.viewMatrix();
-        glm::mat4 proj  = g_app.camera.projectionMatrix(aspect);
+        // 1. Ile (opaque) — depth buffer bloquera l'ocean au-dessus
+        island.draw(view, proj, lightDir, camPos);
 
-        terrainShader.use();
-        terrainShader.setMat4 ("uModel",       model);
-        terrainShader.setMat4 ("uView",        view);
-        terrainShader.setMat4 ("uProjection",  proj);
-        terrainShader.setFloat("uSeaLevel",    g_app.terrainParams.seaLevel);
-        terrainShader.setFloat("uHeightScale", g_app.terrainParams.heightScale);
-        terrainShader.setVec3 ("uLightDir",    glm::normalize(glm::vec3(0.6f, 1.0f, 0.4f)));
-        terrainShader.setVec3 ("uCameraPos",   g_app.camera.position());
-
-        terrain->mesh().draw();
-        terrainShader.unuse();
+        // 2. Ocean (semi-transparent) — sous l'ile grace au depth test
+        ocean.draw(view, proj, g.time);
 
         // ---- UI ----
         renderUI();
 
-        glfwSwapBuffers(window);
+        glfwSwapBuffers(win);
     }
 
-    // ---- Nettoyage ----
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
-    glfwDestroyWindow(window);
+    glfwDestroyWindow(win);
     glfwTerminate();
-
     return 0;
 }

@@ -1,57 +1,33 @@
-/**Projet majeure 4ETI - CPE Lyon - 2025/2026 */
-
 #pragma once
 
-#ifndef OCEAN_HPP
-#define OCEAN_HPP
+#include <glad/glad.h>
+#include <glm/glm.hpp>
+#include "../renderer/shader.hpp"
+#include "../renderer/mesh.hpp"
 
-#include <GL/glew.h>
+// Ocean : plan XZ anime par des vagues (vertex shader)
+// Convention : Y = hauteur, plan de base a Y = 0
 
-#include "../lib/3d/vec3.hpp"
-#include "../lib/3d/vec2.hpp"
-#include "../lib/mesh/mesh.hpp"
-#include "../lib/opengl/mesh_opengl.hpp"
-#include "../lib/interface/camera_matrices.hpp"
-
-#include <QElapsedTimer>
-
-class myWidgetGL;
-
-class scene
-{
+class Ocean {
 public:
+    Ocean();
 
-    scene();
+    // Charge le shader et construit la grille GPU
+    void init();
 
-    /** \brief Method called only once at the beginning */
-    void load_scene();
+    // Dessine l'ocean
+    // view, proj : matrices camera  |  time : secondes depuis le debut
+    void draw(const glm::mat4& view,
+              const glm::mat4& proj,
+              float            time);
 
-    /** \brief Method called at every frame */
-    void draw_scene();
-
-    /** Set the pointer to the parent Widget */
-    void set_widget(myWidgetGL* widget_param);
+    // Parametres de la grille
+    int   gridResolution = 80;      // NxN sommets
+    float worldSize      = 200.0f;  // taille en unites monde (meme echelle que le terrain)
 
 private:
+    Shader m_shader;
+    Mesh   m_mesh;
 
-    /** Load a texture from a given file and returns its id */
-    GLuint load_texture_file(std::string const& filename);
-
-    /** Access to the parent object */
-    myWidgetGL* pwidget;
-
-    /** Default id for the texture (white texture) */
-    GLuint texture_default;
-
-    /** The id of the shader to draw the ocean */
-    GLuint shader_program_id;
-
-    /** Ocean mesh (CPU, static) */
-    cpe::mesh        ocean_mesh;
-    cpe::mesh_opengl ocean_mesh_opengl;
-
-    /** Timer for animation */
-    QElapsedTimer timer;
+    void buildGrid();
 };
-
-#endif
