@@ -110,7 +110,7 @@ void processKeyboard(GLFWwindow* window) {
 // Interface ImGui — panneau de controle du terrain
 // ---------------------------------------------------------------------------
 
-void renderUI(TerrainGenerator& terrain) {
+void renderUI() {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -255,7 +255,7 @@ int main() {
         terrainShader.unuse();
 
         // ---- UI ----
-        renderUI(*terrain);
+        renderUI();
 
         glfwSwapBuffers(window);
     }
