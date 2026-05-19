@@ -8,7 +8,6 @@ uniform mat4  uModel;
 uniform mat4  uView;
 uniform mat4  uProjection;
 uniform float uTime;
-uniform float uWorldSize;
 
 out float vWaveHeight;
 out vec2  vUV;
@@ -17,7 +16,6 @@ out vec3  vWorldPos;
 void main() {
     vec3 pos = aPosition;
 
-    // Superposition de 3 vagues de Gerstner simplifiees
     float wave = 0.0;
     wave += 1.2 * sin(0.018 * pos.x + uTime * 0.8);
     wave += 0.7 * cos(0.025 * pos.z + uTime * 1.1);
