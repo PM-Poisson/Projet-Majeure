@@ -76,7 +76,6 @@ void Ocean::draw(const glm::mat4& view,
     m_shader.setMat4 ("uView",       view);
     m_shader.setMat4 ("uProjection", proj);
     m_shader.setFloat("uTime",       time);
-    m_shader.setFloat("uWorldSize",  worldSize);
 
     // Transparence legere pour l'eau
     glEnable(GL_BLEND);
