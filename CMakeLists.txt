@@ -37,6 +37,7 @@ set(SOURCES
     src/terrain/map.cpp
     src/terrain/terrain.cpp
     src/terrain/scene.cpp
+    src/terrain/diamond_square.cpp
 
     src/ocean/ocean.cpp
 

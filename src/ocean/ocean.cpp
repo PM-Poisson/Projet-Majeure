@@ -56,7 +56,12 @@ void Ocean::draw(const glm::mat4& view,
 {
     m_shader.use();
 
-    glm::mat4 model = glm::mat4(1.0f);
+    // On abaisse le plan de base de l'ocean de oceanBaseY unites.
+    // Les vagues de Gerstner ajoutent ~4 unites vers le haut dans le vertex shader.
+    // Avec oceanBaseY = -3.5, le niveau moyen visible est ~0.5 unites,
+    // ce qui laisse la plage du terrain (Y ~ 0..2) visible au bord de l'eau.
+    glm::mat4 model = glm::translate(glm::mat4(1.0f),
+                                     glm::vec3(0.0f, oceanBaseY, 0.0f));
     m_shader.setMat4 ("uModel",      model);
     m_shader.setMat4 ("uView",       view);
     m_shader.setMat4 ("uProjection", proj);

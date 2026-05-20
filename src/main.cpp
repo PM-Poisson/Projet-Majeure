@@ -20,7 +20,9 @@ struct AppState {
     bool   firstMouse  = true;
     bool   rightButton = false;
     float  lastFrame = 0.0f, deltaTime = 0.0f, time = 0.0f;
-    IslandParams islandParams;
+    IslandParams  islandParams;
+    TerrainMethod terrainMethod = TerrainMethod::SimplexNoise;
+    float  oceanBaseY = -3.5f;   // niveau de base de l'ocean (ajustable)
     bool   regenerate = false;
     bool   wireframe  = false;
 };
@@ -58,7 +60,7 @@ void renderUI() {
     ImGui::NewFrame();
 
     ImGui::SetNextWindowPos ({10,10},  ImGuiCond_Once);
-    ImGui::SetNextWindowSize({310,400}, ImGuiCond_Once);
+    ImGui::SetNextWindowSize({320,480}, ImGuiCond_Once);
     ImGui::Begin("Coastal Erosion");
 
     ImGui::Text("Camera : %s  (F pour basculer)",
@@ -66,23 +68,54 @@ void renderUI() {
     ImGui::Text("TAB: wireframe  |  clic droit: rotation");
     ImGui::Separator();
 
-    IslandParams& p = g.islandParams;
-
-    ImGui::Text("Forme de l'ile");
-    ImGui::SliderFloat("Rayon plateau",  &p.islandRadius, 0.15f, 0.65f);
-    ImGui::SliderFloat("Abruption falaise", &p.shoreBlend, 0.03f, 0.30f,
-                       "%.3f  (petit=abrupt)");
-    ImGui::SliderFloat("Hauteur max",   &p.heightScale,  5.0f, 80.0f);
+    // --- Choix de la methode de generation ---
+    ImGui::Text("Methode de generation");
+    bool isSimplex = (g.terrainMethod == TerrainMethod::SimplexNoise);
+    bool isDS      = (g.terrainMethod == TerrainMethod::DiamondSquare);
+    if (ImGui::RadioButton("Simplex + Domain Warping", isSimplex))
+        g.terrainMethod = TerrainMethod::SimplexNoise;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Diamond-Square [Galin 2019]", isDS))
+        g.terrainMethod = TerrainMethod::DiamondSquare;
     ImGui::Separator();
 
-    ImGui::Text("Detail de surface");
-    ImGui::SliderFloat("Freq bruit",    &p.noiseFreq,    0.001f, 0.008f, "%.4f");
-    ImGui::SliderInt  ("Octaves",       &p.octaves,      2, 10);
-    ImGui::SliderFloat("Domain warp",   &p.warpStrength, 0.0f, 3.0f);
+    IslandParams& p = g.islandParams;
+
+    // --- Forme commune aux deux methodes ---
+    ImGui::Text("Forme de l'ile");
+    ImGui::SliderFloat("Rayon plateau", &p.islandRadius, 0.20f, 0.60f);
+    ImGui::SliderFloat("Largeur plage", &p.shoreBlend,   0.08f, 0.35f,
+                       "%.3f");
+    ImGui::SliderFloat("Asymetrie",     &p.cliffiness,   0.00f, 0.38f,
+                       "%.2f  (0=rond)");
+    ImGui::SliderFloat("Hauteur max",   &p.heightScale,  8.0f,  60.0f);
+    ImGui::Separator();
+
+    // --- Parametres specifiques a la methode active ---
+    if (g.terrainMethod == TerrainMethod::SimplexNoise) {
+        ImGui::Text("Simplex : detail de surface");
+        ImGui::SliderFloat("Freq bruit",   &p.noiseFreq,    0.001f, 0.008f, "%.4f");
+        ImGui::SliderInt  ("Octaves",      &p.octaves,      2, 10);
+        ImGui::SliderFloat("Domain warp",  &p.warpStrength, 0.0f, 3.0f);
+    } else {
+        ImGui::Text("Diamond-Square : subdivision fractale");
+        ImGui::SliderInt  ("Subdivisions", &p.dsSteps,     5, 12,
+                           "%d  (resolution 2^n+1)");
+        ImGui::SliderFloat("Rugosite H",   &p.dsRoughness, 0.2f, 0.9f,
+                           "%.2f  (bas=rugueux, haut=lisse)");
+        // Affiche la resolution resultante
+        int dsN = DiamondSquare::gridSize(p.dsSteps);
+        ImGui::Text("  => grille native : %dx%d", dsN, dsN);
+    }
     ImGui::Separator();
 
     ImGui::InputScalar("Seed", ImGuiDataType_U32, &p.seed);
     if(ImGui::Button("Regenerer", {-1,0})) g.regenerate=true;
+
+    ImGui::Separator();
+    ImGui::Text("Ocean");
+    ImGui::SliderFloat("Niveau ocean", &g.oceanBaseY, -8.0f, 2.0f,
+                       "%.1f  (vagues +~4 par dessus)");
 
     ImGui::Separator();
     ImGui::Text("FPS : %.1f", ImGui::GetIO().Framerate);
@@ -127,7 +160,7 @@ int main() {
     ocean.init();
 
     IslandScene island;
-    island.init(g.islandParams);
+    island.init(g.islandParams, g.terrainMethod);
 
     const glm::vec3 lightDir = glm::normalize(glm::vec3(0.6f,1.0f,0.4f));
 
@@ -140,7 +173,7 @@ int main() {
         glfwPollEvents();
         processKeys(win);
 
-        if(g.regenerate){ island.regenerate(g.islandParams); g.regenerate=false; }
+        if(g.regenerate){ island.regenerate(g.islandParams, g.terrainMethod); g.regenerate=false; }
 
         glClearColor(0.52f,0.72f,0.88f,1.0f);
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
@@ -153,7 +186,8 @@ int main() {
         // 1. Ile (opaque) — depth buffer bloque l'ocean au-dessus
         island.draw(view, proj, lightDir, camPos);
 
-        // 2. Ocean (semi-transparent) — passe sous l'ile
+        // 2. Ocean (semi-transparent) — niveau ajustable depuis ImGui
+        ocean.oceanBaseY = g.oceanBaseY;
         ocean.draw(view, proj, g.time, lightDir, camPos);
 
         renderUI();

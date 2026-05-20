@@ -4,115 +4,187 @@
 #include <cmath>
 #include <algorithm>
 
-IslandScene::IslandScene() : m_noise(42) {}
+IslandScene::IslandScene() : m_noise(42), m_noiseShape(137) {}
 
-// ---------------------------------------------------------------------------
-// radialCoastProfile
-//
-// Equivalent radial du coastProfile() de TerrainGenerator.
-// d : distance normalisee au centre de l'ile, dans [0, 1]
-//     0 = centre de l'ile, 1 = bord de la grille
-//
-// Retourne dans [-1, 1] :
-//   > 0  => zone terrestre (plateau)
-//   < 0  => zone marine (sous l'eau)
-//
-// La transition se fait autour de islandRadius, sur une largeur shoreBlend.
-// Un shoreBlend petit (<0.08) donne des falaises tres abruptes.
-// Un shoreBlend grand (>0.2) donne une plage en pente douce.
-// ---------------------------------------------------------------------------
-float IslandScene::radialCoastProfile(float d) const {
-    // On centre la sigmoide sur islandRadius
-    float x = (d - params.islandRadius) / params.shoreBlend;
-    // tanh : vaut +1 loin du bord (centre ile), -1 loin du centre (ocean)
-    // On l'inverse car d=0 est le centre et d=1 est le bord
-    return -std::tanh(x * 2.5f);
+// ===========================================================================
+// Profils de forme (communs aux deux methodes)
+// ===========================================================================
+
+float IslandScene::localRadius(float nx, float nz) const {
+    float shapeNoise = m_noiseShape.fractal2D(
+        nx * 0.4f, nz * 0.4f, 2, 2.0f, 0.5f);
+    return params.islandRadius + shapeNoise * params.cliffiness;
 }
-// ---------------------------------------------------------------------------
-// cliffProfile
-//
-// Repris identiquement de TerrainGenerator::cliffProfile().
-// Aplatit les sommets (plateau) et les fonds (fond marin),
-// mais rend la transition tres abrupte => effet falaise.
-// ---------------------------------------------------------------------------
+
+float IslandScene::shoreProfile(float distToEdge, float beachFactor) const {
+    float blend = params.shoreBlend;
+    if (distToEdge < -blend) return -1.0f;
+    if (distToEdge >  blend) return  1.0f;
+
+    float t = distToEdge / blend;
+    float beachWidth = beachFactor * 0.55f;
+
+    if (t > -beachWidth && t < beachWidth) {
+        return std::clamp(t / (beachWidth * 3.5f), -0.25f, 0.25f);
+    } else if (t >= beachWidth) {
+        float s = (t - beachWidth) / (1.0f - beachWidth);
+        return 0.25f + 0.75f * std::tanh(s * 3.5f);
+    } else {
+        float s = (t + beachWidth) / beachWidth;
+        return -1.0f + 0.75f * std::tanh(s * 2.0f);
+    }
+}
+
 float IslandScene::cliffProfile(float rawHeight) const {
     float h = rawHeight;
-    if (h > 0.0f)
-        h = std::pow(h, 0.7f);   // plateau : compression des hautes valeurs
-    else
-        h = -std::pow(-h, 0.6f); // fond marin : compression des basses valeurs
+    if (h > 0.0f) h =  std::pow( h, 0.72f);
+    else           h = -std::pow(-h, 0.55f);
     return h;
 }
 
-// ---------------------------------------------------------------------------
-// buildMesh
+// ===========================================================================
+// applyIslandMask
 //
-// Algorithme (meme logique que TerrainGenerator::buildHeightmap) :
+// Prend une heightmap brute ([-1,1], taille NxN) et applique :
+//   1. Masque d'ile radial asymetrique (localRadius + shoreProfile)
+//   2. cliffProfile
+//   3. Mise a l'echelle par heightScale
 //
-//  1. Bruit fractal warpé  => raw dans [-1,1]  (detail de surface)
-//  2. Masque radial        => coast dans [-1,1] (forme ile/ocean)
-//  3. Melange 50/50        => blended           (terrain brut)
-//  4. cliffProfile         => height            (falaises accentuees)
-//  5. Mise a l'echelle     => * heightScale
-//
-// La difference avec TerrainGenerator : le "profil de cote" est
-// radial (distance au centre) plutot que lineaire (position en X).
-// ---------------------------------------------------------------------------
-void IslandScene::buildMesh() {
-    const int   N    = params.gridN;
-    const float half = params.worldSize * 0.5f;
-    const float step = params.worldSize / float(N - 1);
-    const float f    = params.noiseFreq;
-
-    // --- Calcul des hauteurs CPU ---
+// Appelee par les deux methodes de generation.
+// ===========================================================================
+std::vector<float> IslandScene::applyIslandMask(
+        const std::vector<float>& rawHeights, int N) const
+{
     std::vector<float> heights(N * N);
 
     for (int z = 0; z < N; ++z) {
         for (int x = 0; x < N; ++x) {
-            // Coordonnees normalisees [-1, 1]
             float nx = 2.0f * x / float(N - 1) - 1.0f;
             float nz = 2.0f * z / float(N - 1) - 1.0f;
+            float d  = std::sqrt(nx*nx + nz*nz) / std::sqrt(2.0f);
 
-            // Distance normalisee au centre [0, ~1.41]
-            // On la normalise sur [0,1] en divisant par sqrt(2)
-            float d = std::sqrt(nx * nx + nz * nz) / std::sqrt(2.0f);
+            float raw    = rawHeights[z * N + x];  // dans [-1, 1]
+            float radius = localRadius(nx, nz);
 
-            // 1. Bruit warpé (detail de surface du plateau et des falaises)
-            //    Meme parametres que votre TerrainGenerator original
-            float raw = m_noise.warpedFractal2D(
-                nx / (f * 333.0f),   // conversion : noiseFreq ~0.003 => freq monde
+            float distToEdge    = (radius - d) / params.shoreBlend;
+            float distClamped   = std::clamp(distToEdge, -1.0f, 1.0f)
+                                  * params.shoreBlend;
+
+            float radiusDev     = (radius - params.islandRadius)
+                                  / std::max(params.cliffiness, 1e-4f);
+            float beachFactor   = std::clamp(radiusDev * 0.5f + 0.5f, 0.0f, 1.0f);
+
+            float shore = shoreProfile(distClamped, beachFactor);
+
+            float centerWeight = std::clamp(distClamped / params.shoreBlend,
+                                            0.0f, 1.0f);
+            float noiseWeight  = 0.35f + centerWeight * 0.35f;
+            float shoreWeight  = 1.0f - noiseWeight;
+            float blended      = raw * noiseWeight + shore * shoreWeight;
+
+            heights[z * N + x] = cliffProfile(blended) * params.heightScale;
+        }
+    }
+    return heights;
+}
+
+// ===========================================================================
+// generateSimplex — methode originale
+// ===========================================================================
+std::vector<float> IslandScene::generateSimplex(int N) const {
+    const float f = params.noiseFreq;
+    std::vector<float> raw(N * N);
+
+    for (int z = 0; z < N; ++z) {
+        for (int x = 0; x < N; ++x) {
+            float nx = 2.0f * x / float(N - 1) - 1.0f;
+            float nz = 2.0f * z / float(N - 1) - 1.0f;
+            raw[z * N + x] = m_noise.warpedFractal2D(
+                nx / (f * 333.0f),
                 nz / (f * 333.0f),
                 params.octaves,
                 params.warpStrength
             );
-            // raw dans [-1, 1]
-
-            // 2. Masque radial (equivalent du coastProfile lineaire)
-            float coast = radialCoastProfile(d);
-            // coast dans [-1, 1] : +1 au centre, -1 en bordure
-
-            // 3. Melange identique a TerrainGenerator :
-            //    50% bruit + 50% forme => garde le detail tout en imposant la forme
-            float blended = raw * 0.5f + coast * 0.5f;
-
-            // 4. Profil de falaise : aplatit les hauts (plateau) et les bas (fond)
-            float height = cliffProfile(blended);
-
-            // 5. Mise a l'echelle
-            heights[z * N + x] = height * params.heightScale;
         }
     }
+    return raw;
+}
 
-    // --- Construction du mesh (position + normale + uv) ---
+// ===========================================================================
+// generateDiamondSquare — methode par subdivision [Galin et al. 2019]
+//
+// L'algorithme genere une grille de taille (2^dsSteps + 1)^2.
+// On redimensionne ensuite bilineairement si la resolution demandee
+// (gridN) est differente.
+// ===========================================================================
+std::vector<float> IslandScene::generateDiamondSquare() const {
+    DiamondSquareParams dsp;
+    dsp.steps     = params.dsSteps;
+    dsp.roughness = params.dsRoughness;
+    dsp.seed      = params.seed;
+
+    // Genere la heightmap brute a la resolution native Diamond-Square
+    std::vector<float> ds = DiamondSquare::generate(dsp);
+    int dsN = DiamondSquare::gridSize(params.dsSteps);
+
+    // Redimensionnement bilineaire vers gridN x gridN
+    int N = params.gridN;
+    std::vector<float> raw(N * N);
+
+    for (int z = 0; z < N; ++z) {
+        for (int x = 0; x < N; ++x) {
+            // Coordonnees dans la grille DS
+            float fx = float(x) / float(N - 1) * float(dsN - 1);
+            float fz = float(z) / float(N - 1) * float(dsN - 1);
+
+            int x0 = std::clamp(int(fx),     0, dsN - 1);
+            int x1 = std::clamp(int(fx) + 1, 0, dsN - 1);
+            int z0 = std::clamp(int(fz),     0, dsN - 1);
+            int z1 = std::clamp(int(fz) + 1, 0, dsN - 1);
+
+            float tx = fx - float(x0);
+            float tz = fz - float(z0);
+
+            // Interpolation bilineaire
+            float h00 = ds[z0 * dsN + x0];
+            float h10 = ds[z0 * dsN + x1];
+            float h01 = ds[z1 * dsN + x0];
+            float h11 = ds[z1 * dsN + x1];
+
+            raw[z * N + x] = (h00 * (1-tx) + h10 * tx) * (1-tz)
+                           + (h01 * (1-tx) + h11 * tx) *    tz;
+        }
+    }
+    return raw;
+}
+
+// ===========================================================================
+// buildMesh — construit le mesh OpenGL depuis les hauteurs calculees
+// ===========================================================================
+void IslandScene::buildMesh() {
+    const int   N    = params.gridN;
+    const float half = params.worldSize * 0.5f;
+    const float step = params.worldSize / float(N - 1);
+
+    // 1. Generation de la heightmap brute selon la methode choisie
+    std::vector<float> raw;
+    if (method == TerrainMethod::DiamondSquare)
+        raw = generateDiamondSquare();
+    else
+        raw = generateSimplex(N);
+
+    // 2. Application du masque d'ile + profils (commun aux deux methodes)
+    std::vector<float> heights = applyIslandMask(raw, N);
+
+    // 3. Construction du mesh (position + normale + uv)
     std::vector<float>        vertices;
     std::vector<unsigned int> indices;
     vertices.reserve(N * N * 8);
-    indices.reserve((N - 1) * (N - 1) * 6);
+    indices.reserve((N-1) * (N-1) * 6);
 
-    // Acces securise a la heightmap pour les normales
     auto h = [&](int xi, int zi) -> float {
-        xi = std::clamp(xi, 0, N - 1);
-        zi = std::clamp(zi, 0, N - 1);
+        xi = std::clamp(xi, 0, N-1);
+        zi = std::clamp(zi, 0, N-1);
         return heights[zi * N + xi];
     };
 
@@ -122,32 +194,27 @@ void IslandScene::buildMesh() {
             float py = heights[z * N + x];
             float pz = -half + z * step;
 
-            // Normale par differences finies centrales (identique a Heightmap::getNormal)
-            float hL = h(x-1, z), hR = h(x+1, z);
-            float hD = h(x, z-1), hU = h(x, z+1);
+            float hL = h(x-1,z), hR = h(x+1,z);
+            float hD = h(x,z-1), hU = h(x,z+1);
             glm::vec3 n = glm::normalize(glm::vec3(
                 (hL - hR) / (2.0f * step),
                 1.0f,
                 (hD - hU) / (2.0f * step)
             ));
 
-            float u = float(x) / float(N - 1);
-            float v = float(z) / float(N - 1);
-
             vertices.insert(vertices.end(), {
                 px, py, pz,
                 n.x, n.y, n.z,
-                u, v
+                float(x) / float(N-1),
+                float(z) / float(N-1)
             });
         }
     }
 
-    for (int z = 0; z < N - 1; ++z) {
-        for (int x = 0; x < N - 1; ++x) {
-            unsigned int tl = z * N + x;
-            unsigned int tr = tl + 1;
-            unsigned int bl = tl + N;
-            unsigned int br = bl + 1;
+    for (int z = 0; z < N-1; ++z) {
+        for (int x = 0; x < N-1; ++x) {
+            unsigned int tl = z*N+x, tr = tl+1;
+            unsigned int bl = tl+N,  br = bl+1;
             indices.push_back(tl); indices.push_back(bl); indices.push_back(tr);
             indices.push_back(tr); indices.push_back(bl); indices.push_back(br);
         }
@@ -156,19 +223,23 @@ void IslandScene::buildMesh() {
     m_mesh.upload(vertices, indices);
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // API publique
-// ---------------------------------------------------------------------------
-void IslandScene::init(const IslandParams& p) {
-    params  = p;
-    m_noise = NoiseGenerator(p.seed);
+// ===========================================================================
+void IslandScene::init(const IslandParams& p, TerrainMethod m) {
+    params      = p;
+    method      = m;
+    m_noise     = NoiseGenerator(p.seed);
+    m_noiseShape= NoiseGenerator(p.seed + 137);
     m_shader.load("shaders/terrain.vert", "shaders/terrain.frag");
     buildMesh();
 }
 
-void IslandScene::regenerate(const IslandParams& p) {
-    params  = p;
-    m_noise = NoiseGenerator(p.seed);
+void IslandScene::regenerate(const IslandParams& p, TerrainMethod m) {
+    params      = p;
+    method      = m;
+    m_noise     = NoiseGenerator(p.seed);
+    m_noiseShape= NoiseGenerator(p.seed + 137);
     buildMesh();
 }
 
@@ -179,12 +250,13 @@ void IslandScene::draw(const glm::mat4& view,
 {
     m_shader.use();
     glm::mat4 model = glm::mat4(1.0f);
-    m_shader.setMat4 ("uModel",       model);
-    m_shader.setMat4 ("uView",        view);
-    m_shader.setMat4 ("uProjection",  proj);
-    m_shader.setFloat("uSeaLevel",  params.seaLevel);
-    m_shader.setVec3 ("uLightDir",  lightDir);
-    m_shader.setVec3 ("uCameraPos",   cameraPos);
+    m_shader.setMat4 ("uModel",      model);
+    m_shader.setMat4 ("uView",       view);
+    m_shader.setMat4 ("uProjection", proj);
+    m_shader.setFloat("uSeaLevel",   params.seaLevel);
+    m_shader.setFloat("uHeightScale", params.heightScale);
+    m_shader.setVec3 ("uLightDir",   lightDir);
+    m_shader.setVec3 ("uCameraPos",  cameraPos);
     m_mesh.draw();
     m_shader.unuse();
 }
