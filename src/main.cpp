@@ -22,9 +22,11 @@ struct AppState {
     float  lastFrame = 0.0f, deltaTime = 0.0f, time = 0.0f;
     IslandParams  islandParams;
     TerrainMethod terrainMethod = TerrainMethod::SimplexNoise;
-    float  oceanBaseY = -3.5f;   // niveau de base de l'ocean (ajustable)
-    bool   regenerate = false;
-    bool   wireframe  = false;
+    float  oceanBaseY = -3.5f;
+    bool   regenerate  = false;
+    bool   wireframe   = false;
+    bool   showIsland  = true;   // afficher le terrain
+    bool   showOcean   = true;   // afficher l'océan
 };
 static AppState g;
 
@@ -99,7 +101,7 @@ void renderUI() {
         ImGui::SliderFloat("Domain warp",  &p.warpStrength, 0.0f, 3.0f);
     } else {
         ImGui::Text("Diamond-Square : subdivision fractale");
-        ImGui::SliderInt  ("Subdivisions", &p.dsSteps,     5, 12,
+        ImGui::SliderInt  ("Subdivisions", &p.dsSteps,     5, 10,
                            "%d  (resolution 2^n+1)");
         ImGui::SliderFloat("Rugosite H",   &p.dsRoughness, 0.2f, 0.9f,
                            "%.2f  (bas=rugueux, haut=lisse)");
@@ -116,6 +118,12 @@ void renderUI() {
     ImGui::Text("Ocean");
     ImGui::SliderFloat("Niveau ocean", &g.oceanBaseY, -8.0f, 2.0f,
                        "%.1f  (vagues +~4 par dessus)");
+
+    ImGui::Separator();
+    ImGui::Text("Affichage");
+    ImGui::Checkbox("Terrain (ile)", &g.showIsland);
+    ImGui::SameLine();
+    ImGui::Checkbox("Ocean", &g.showOcean);
 
     ImGui::Separator();
     ImGui::Text("FPS : %.1f", ImGui::GetIO().Framerate);
@@ -184,11 +192,14 @@ int main() {
         glm::vec3 camPos = g.camera.position();
 
         // 1. Ile (opaque) — depth buffer bloque l'ocean au-dessus
-        island.draw(view, proj, lightDir, camPos);
+        if (g.showIsland)
+            island.draw(view, proj, lightDir, camPos);
 
         // 2. Ocean (semi-transparent) — niveau ajustable depuis ImGui
-        ocean.oceanBaseY = g.oceanBaseY;
-        ocean.draw(view, proj, g.time, lightDir, camPos);
+        if (g.showOcean) {
+            ocean.oceanBaseY = g.oceanBaseY;
+            ocean.draw(view, proj, g.time, lightDir, camPos);
+        }
 
         renderUI();
         glfwSwapBuffers(win);
