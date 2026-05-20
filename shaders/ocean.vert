@@ -1,14 +1,5 @@
 #version 430 core
 
-// ---------------------------------------------------------------------------
-// ocean.vert
-//
-// Simulation de vagues par superposition de vagues de Gerstner.
-// Chaque vague a une direction, longueur d'onde, amplitude et vitesse propres.
-//
-// Repere : XZ = plan horizontal, Y = hauteur (convention de votre projet)
-// ---------------------------------------------------------------------------
-
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aUV;
@@ -24,30 +15,24 @@ out vec2  vUV;
 out float vWaveHeight;
 
 // ---------------------------------------------------------------------------
+// Hash déterministe : même position → même valeur entre 0 et 1
+// ---------------------------------------------------------------------------
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+// ---------------------------------------------------------------------------
 // Une vague de Gerstner
-//
-// Parametres :
-//   p         : position XZ du sommet (avant deformation)
-//   amplitude : hauteur max de la vague
-//   wavelength: longueur d'onde (metres)
-//   speed     : vitesse de propagation
-//   direction : direction de propagation (vecteur XZ normalise)
-//
-// Retourne la hauteur Y et modifie pos pour le deplacement horizontal (effet
-// Gerstner : les sommets decrivent des cercles, pas juste monter/descendre)
 // ---------------------------------------------------------------------------
 vec3 gerstnerWave(vec2 p, float amplitude, float wavelength,
                   float speed, vec2 direction,
                   float time, out vec3 normal_contrib)
 {
-    float k     = 2.0 * 3.14159265 / wavelength;   // nombre d'onde
-    float c     = speed;                             // vitesse de phase
-    float f     = k * dot(direction, p) - c * time; // phase
-    float Q     = 0.6;                               // raideur (0=sinusoide, 1=Gerstner pur)
+    float k     = 2.0 * 3.14159265 / wavelength;
+    float c     = speed;
+    float f     = k * dot(direction, p) - c * time;
+    float Q     = 0.6;
 
-    // Deplacement de Gerstner :
-    //   horizontal (XZ) : Q * A * direction * cos(f)
-    //   vertical   (Y)  :     A             * sin(f)
     float sinf  = sin(f);
     float cosf  = cos(f);
 
@@ -56,7 +41,6 @@ vec3 gerstnerWave(vec2 p, float amplitude, float wavelength,
     disp.y = amplitude * sinf;
     disp.z = Q * amplitude * direction.y * cosf;
 
-    // Contribution a la normale analytique (derivee de Gerstner)
     normal_contrib = vec3(
         -direction.x * k * amplitude * cosf,
          1.0 - Q * k * amplitude * sinf,
@@ -68,37 +52,42 @@ vec3 gerstnerWave(vec2 p, float amplitude, float wavelength,
 
 void main()
 {
-    vec3 pos = aPosition;
+    vec3 pos  = aPosition;
     vec3 norm = vec3(0.0, 0.0, 0.0);
     vec3 norm_i;
 
-    // --- 5 vagues de Gerstner avec des directions et parametres varies ---
-    // Vague principale (longue, vient du large)
-    pos  += gerstnerWave(aPosition.xz, 1.8,  80.0, 1.5,
+    // --- 5 vagues de Gerstner ---
+    pos  += gerstnerWave(aPosition.xz, 0.9,  40, 1.5,
                          normalize(vec2(1.0,  0.3)), uTime, norm_i);
     norm += norm_i;
 
-    // Vague secondaire (croise la principale)
-    pos  += gerstnerWave(aPosition.xz, 1.1,  55.0, 1.2,
+    pos  += gerstnerWave(aPosition.xz, 0.55,  27.0, 1.2,
                          normalize(vec2(0.7,  1.0)), uTime, norm_i);
     norm += norm_i;
 
-    // Vague tertiaire (direction opposee, interference)
-    pos  += gerstnerWave(aPosition.xz, 0.6,  32.0, 0.9,
+    pos  += gerstnerWave(aPosition.xz, 0.3,  16.0, 0.9,
                          normalize(vec2(-0.4, 0.8)), uTime, norm_i);
     norm += norm_i;
 
-    // Vaguelette haute frequence (detail de surface)
-    pos  += gerstnerWave(aPosition.xz, 0.25, 14.0, 1.8,
+    pos  += gerstnerWave(aPosition.xz, 0.12, 7.0, 1.8,
                          normalize(vec2(0.9, -0.2)), uTime, norm_i);
     norm += norm_i;
 
-    // Vaguelette supplementaire (texture de surface)
-    pos  += gerstnerWave(aPosition.xz, 0.15,  9.0, 2.2,
+    pos  += gerstnerWave(aPosition.xz, 0.075,  4.5, 2.2,
                          normalize(vec2(-0.6, -0.7)), uTime, norm_i);
     norm += norm_i;
 
-    // Normale finale normalisee
+    // --- Perturbation locale par hash ---
+    // Cellules de ~25 unités monde (200/8 = 25)
+    vec2  cell     = floor(aPosition.xz * 0.04);
+    float local_id = hash(cell);
+    // Pulse lent et déphasé par cellule (période ~25s)
+    float pulse    = sin(uTime * 0.25 + local_id * 6.2832);
+    // Actif sur ~50% des cellules, amplitude max 0.8 (cohérent avec Gerstner)
+    float extra    = 1.5 * pulse * step(0.3, local_id);
+    pos.y += extra;
+
+    // Normale finale normalisée
     vNormal     = normalize(norm);
     vWaveHeight = pos.y;
     vUV         = aUV;
