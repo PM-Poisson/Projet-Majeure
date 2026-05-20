@@ -5,29 +5,23 @@
 #include "../renderer/shader.hpp"
 #include "../renderer/mesh.hpp"
 
-// Ocean : plan XZ anime par des vagues (vertex shader)
-// Convention : Y = hauteur, plan de base a Y = 0
-
 class Ocean {
 public:
     Ocean();
 
-    // Charge le shader et construit la grille GPU
     void init();
 
-    // Dessine l'ocean
-    // view, proj : matrices camera  |  time : secondes depuis le debut
     void draw(const glm::mat4& view,
               const glm::mat4& proj,
-              float            time);
+              float            time,
+              const glm::vec3& lightDir,
+              const glm::vec3& cameraPos);
 
-    // Parametres de la grille
-    int   gridResolution = 80;      // NxN sommets
-    float worldSize      = 200.0f;  // taille en unites monde (meme echelle que le terrain)
+    int   gridResolution = 120;   // plus élevé = vagues plus lisses
+    float worldSize      = 200.0f;
 
 private:
     Shader m_shader;
     Mesh   m_mesh;
-
-    void buildGrid();
+    void   buildGrid();
 };

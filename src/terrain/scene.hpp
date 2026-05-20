@@ -14,7 +14,7 @@ struct IslandParams {
     float heightScale  = 35.0f;
     float seaLevel     = 0.0f;
     float islandRadius = 0.42f;  // rayon du plateau [0..1]
-    float shoreBlend   = 0.12f;  // largeur falaise : petit=abrupt, grand=doux
+    float shoreBlend   = 0.5f;  // largeur falaise : petit=abrupt, grand=doux
     float noiseFreq    = 0.003f;
     int   octaves      = 7;
     float warpStrength = 1.2f;

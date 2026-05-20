@@ -154,7 +154,7 @@ int main() {
         island.draw(view, proj, lightDir, camPos);
 
         // 2. Ocean (semi-transparent) — passe sous l'ile
-        ocean.draw(view, proj, g.time);
+        ocean.draw(view, proj, g.time, lightDir, camPos);
 
         renderUI();
         glfwSwapBuffers(win);
