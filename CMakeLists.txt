@@ -48,7 +48,6 @@ set(SOURCES
     src/renderer/camera.cpp
     src/renderer/mesh.cpp
 
-    src/external/perlin/simplexnoise1234.cpp
 )
 
 add_executable(coastal-erosion ${SOURCES})

@@ -2,57 +2,52 @@
 
 #include <vector>
 #include <cstdint>
-#include <cstddef>
 
-// ---------------------------------------------------------------------------
-// DiamondSquare — Generateur de heightmap par subdivision recursive
+// ===========================================================================
+// DiamondSquare — génération de terrain par subdivision récursive
 //
-// Reference : Galin et al., "A Review of Digital Terrain Modeling",
+// Référence : Galin et al., "A Review of Digital Terrain Modeling",
 //             EUROGRAPHICS 2019 STAR, Section 3.1.1.
 //             Algorithme original : Fournier, Fussell, Carpenter [FFC82b]
 //
-// Principe (deux etapes alternees) :
+// Principe :
+//   On part d'une grille (2^n+1)² avec les 4 coins initialisés aléatoirement.
+//   À chaque niveau de subdivision, deux passes alternées :
 //
-//   Etape Diamond :
-//     Pour chaque carre de cote s, on calcule le point central comme
-//     la moyenne des 4 coins du carre, auquel on ajoute un deplacement
-//     aleatoire d'ecart-type sigma.
+//   Étape Diamond :
+//     Le centre de chaque carré = moyenne des 4 coins + perturbation aléatoire
 //
-//   Etape Square :
-//     Pour chaque losange (diamond) forme par 4 points adjacents, on
-//     calcule le point central comme la moyenne des 4 extremites du
-//     losange + deplacement aleatoire.
+//   Étape Square :
+//     Le milieu de chaque arête = moyenne des voisins en croix + perturbation
 //
-//   A chaque niveau de subdivision k :
+//   À chaque niveau k, l'amplitude de la perturbation diminue :
 //     sigma_k = sigma_0 * 2^(-k * H)
-//   ou H in (0,1) est l'exposant de Hurst (dimension fractale D = 3 - H).
-//     H proche de 1 => terrain lisse (plaines)
-//     H proche de 0 => terrain tres rugueux (montagnes)
+//   où H est l'exposant de Hurst (roughness).
 //
-// La grille doit avoir une taille (2^n + 1) x (2^n + 1).
-// On choisit n = steps, ce qui donne une resolution de 2^steps + 1.
-// ---------------------------------------------------------------------------
+//   H proche de 0 => terrain très rugueux (dimension fractale D proche de 3)
+//   H proche de 1 => terrain lisse (D proche de 2)
+// ===========================================================================
 
 struct DiamondSquareParams {
-    int      steps       = 8;     // iterations => grille (2^steps+1)^2
-                                  //   8 => 257x257, 9 => 513x513
-    float    roughness   = 0.55f; // exposant de Hurst H in (0,1)
-                                  //   0.3 = tres rugueux, 0.7 = lisse
-    float    initAmpl    = 1.0f;  // amplitude initiale (sigma_0)
-    uint32_t seed        = 42;
+    int      steps     = 8;     // niveaux de subdivision => grille (2^steps+1)²
+    float    roughness = 0.55f; // exposant de Hurst H ∈ (0,1)
+    float    initAmpl  = 1.0f;  // amplitude initiale des coins
+    uint32_t seed      = 42;
 };
 
 class DiamondSquare {
 public:
-    // Genere une heightmap de taille (2^params.steps + 1)^2
-    // Les valeurs retournees sont dans [-1, 1] (non mises a l'echelle)
+    // Génère une heightmap de taille (2^steps+1)², valeurs dans [-1, 1]
     static std::vector<float> generate(const DiamondSquareParams& p);
 
-    // Taille de la grille pour un nombre d'etapes donne
+    // Taille de la grille pour un nombre de subdivisions donné
     static int gridSize(int steps) { return (1 << steps) + 1; }
 
 private:
+    // Perturbation aléatoire dans [-sigma, +sigma] via un LCG rapide
     static float randDisplace(float sigma, uint32_t& state);
+
+    // Accès avec wrapping périodique (pour les bords)
     static float get(const std::vector<float>& g, int n, int x, int z);
     static void  set(std::vector<float>& g, int n, int x, int z, float v);
 };
