@@ -28,7 +28,6 @@ float IslandScene::radialCoastProfile(float d) const {
     // On l'inverse car d=0 est le centre et d=1 est le bord
     return -std::tanh(x * 2.5f);
 }
-
 // ---------------------------------------------------------------------------
 // cliffProfile
 //
