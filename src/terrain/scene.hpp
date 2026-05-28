@@ -16,7 +16,7 @@ struct IslandParams {
     float heightScale  = 35.0f;
     float seaLevel     = 0.0f;
     float islandRadius = 0.42f;
-    float shoreBlend   = 0.12f;  // valeur médiane : modulée x0.25→x4 selon l'angle
+    float shoreBlend   = 0.12f;  // valeur médiane : modulée x0.8→x5 selon l'angle
     float noiseFreq    = 0.003f;
     int   octaves      = 7;
     float warpStrength = 1.2f;
@@ -36,6 +36,12 @@ public:
                     const glm::vec3& cameraPos);
     void regenerate(const IslandParams& p);
 
+    // Accesseurs pour le TreeSystem
+    const std::vector<float>& heights()   const { return m_heights; }
+    int                       gridN()     const { return params.gridN; }
+    float                     worldSize() const { return params.worldSize; }
+    float                     seaLevel()  const { return params.seaLevel; }
+
     IslandParams params;
 
 private:
@@ -44,10 +50,7 @@ private:
     NoiseGenerator     m_noise;
     std::vector<float> m_heights;
 
-    float radialCoastProfile(float d, float localBlend) const;  // localBlend variable
-    float cliffProfile(float rawHeight) const;
-
-    void generateHeights();
+    void generateHeights();   // bruit + masque continu (sans cliffProfile)
     void applyErosion();
     void buildMesh();
 };

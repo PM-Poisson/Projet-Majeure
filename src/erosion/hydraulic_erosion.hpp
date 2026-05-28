@@ -4,15 +4,15 @@
 
 struct RainErosionParams {
     int   numDroplets    = 30000;
-    int   maxSteps       = 80;     // longue durée de vie → transport loin
-    float inertia        = 0.5f;   // plus d'inertie → trajectoires plus lisses
+    int   maxSteps       = 80;
+    float inertia        = 0.5f;
     float gravity        = 3.0f;
-    float evaporation    = 0.008f; // évaporation lente → dépose loin du sommet
-    float capacity       = 8.0f;   // grande capacité → transporte beaucoup
-    float erosionRate    = 0.04f;  // érosion faible → ne creuse pas trop
-    float depositionRate = 0.6f;   // dépôt fort → aplatit et élargit
-    float minSlope       = 0.001f; // seuil très bas → dépose même sur terrain plat
-    float brushRadius    = 3.0f;   // grand pinceau → dépôts lisses et étalés
+    float evaporation    = 0.008f;
+    float capacity       = 8.0f;
+    float erosionRate    = 0.04f;
+    float depositionRate = 0.6f;
+    float minSlope       = 0.001f;
+    float brushRadius    = 3.0f;
     float seaLevel       = 0.0f;
 };
 

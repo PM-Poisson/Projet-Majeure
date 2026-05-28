@@ -23,13 +23,6 @@ HydraulicErosion::computeGradient(const std::vector<float>& h, int N,
             (h01-h00)*(1-tx)+(h11-h10)*tx};
 }
 
-// ---------------------------------------------------------------------------
-// Pinceau de dépôt/érosion
-//
-// Dépôt  : autorisé dès que la cellule est au-dessus du niveau de la mer
-//           (seuil abaissé à seaLevel + 0.1 pour permettre le dépôt en bord de côte)
-// Érosion : uniquement sur terre ferme, clampé à seaLevel
-// ---------------------------------------------------------------------------
 void HydraulicErosion::applyBrush(std::vector<float>& h, int N,
                                    float cx, float cz, float amount,
                                    float radius, float seaLevel) const {
@@ -51,26 +44,13 @@ void HydraulicErosion::applyBrush(std::vector<float>& h, int N,
         float delta=amount*(c.w/tw);
         float cur=h[c.idx];
         if(delta>0.0f) {
-            // Dépôt : sur toute cellule émergée, même juste effleurée par l'eau
-            if(cur>seaLevel)
-                h[c.idx]=cur+delta;
+            if(cur>seaLevel) h[c.idx]=cur+delta;
         } else {
-            // Érosion : seulement sur terre, ne descend pas sous la mer
-            if(cur>seaLevel)
-                h[c.idx]=std::max(seaLevel, cur+delta);
+            if(cur>seaLevel) h[c.idx]=std::max(seaLevel, cur+delta);
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Simulation principale
-//
-// Comportement visé :
-//   - La goutte érode PEU en montant depuis la source (rate faible)
-//   - Elle transporte longtemps (grande capacité, évaporation lente)
-//   - Elle dépose BEAUCOUP dès que la pente diminue (rate élevé)
-//   → résultat : pics aplatis, sédiments étalés en bas de pente = "alluvions"
-// ---------------------------------------------------------------------------
 void HydraulicErosion::run(std::vector<float>& heights, int N,
                             float, const RainErosionParams& p, uint32_t seed) {
     std::mt19937 rng(seed);
@@ -82,12 +62,7 @@ void HydraulicErosion::run(std::vector<float>& heights, int N,
 
         for(int step=0; step<p.maxSteps; ++step) {
             float h0=interpolate(heights,N,x,z);
-            if(h0<=p.seaLevel) {
-                // La goutte atteint la mer : les sédiments se dispersent dans l'eau.
-                // On ne dépose PAS ici — le dépôt côtier vient du dépôt naturel
-                // sur les pentes douces juste avant d'atteindre l'eau (voir ci-dessous).
-                break;
-            }
+            if(h0<=p.seaLevel) break;
 
             auto [gx,gz]=computeGradient(heights,N,x,z);
             dx=dx*p.inertia-gx*(1-p.inertia);
@@ -103,25 +78,19 @@ void HydraulicErosion::run(std::vector<float>& heights, int N,
             if(nx2<1||nx2>=N-2||nz2<1||nz2>=N-2) break;
 
             float h1=interpolate(heights,N,nx2,nz2);
-            float dh=h1-h0;   // positif = montée, négatif = descente
+            float dh=h1-h0;
 
             float slope=std::max(p.minSlope,-dh);
             float cap=slope*speed*water*p.capacity;
 
             if(sediment>cap || dh>0.0f) {
-                // Sur-capacité ou montée : dépôt
                 float amt;
-                if(dh>0.0f)
-                    // Remontée : dépose ce qu'il faut pour "combler" la bosse
-                    amt = std::min(sediment, dh);
-                else
-                    // Légère sur-capacité : dépôt progressif (rate élevé → rapide)
-                    amt = (sediment-cap)*p.depositionRate;
+                if(dh>0.0f) amt = std::min(sediment, dh);
+                else        amt = (sediment-cap)*p.depositionRate;
                 amt=std::max(0.f,amt);
                 sediment-=amt;
                 applyBrush(heights,N,x,z,amt,p.brushRadius,p.seaLevel);
             } else {
-                // Sous-capacité : érosion modérée
                 float amt=std::min((cap-sediment)*p.erosionRate, -dh*0.5f);
                 amt=std::max(0.f,amt);
                 sediment+=amt;

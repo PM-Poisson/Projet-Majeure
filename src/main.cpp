@@ -10,6 +10,7 @@
 #include "terrain/scene.hpp"
 #include "ocean/ocean.hpp"
 #include "renderer/camera.hpp"
+#include "trees/tree_system.hpp"
 
 struct AppState {
     int   width=1280, height=720;
@@ -17,7 +18,8 @@ struct AppState {
     double lastMouseX=0,lastMouseY=0;
     bool   firstMouse=true, rightButton=false;
     float  lastFrame=0,deltaTime=0,time=0;
-    IslandParams islandParams;
+    IslandParams         islandParams;
+    TreePlacementParams  treeParams;
     bool   regenerate=false, wireframe=false;
 };
 static AppState g;
@@ -48,13 +50,13 @@ void processKeys(GLFWwindow* win){
         g.deltaTime);
 }
 
-void renderUI() {
+void renderUI(int treeCount) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
     ImGui::SetNextWindowPos ({10,10},   ImGuiCond_Once);
-    ImGui::SetNextWindowSize({310,480}, ImGuiCond_Once);
+    ImGui::SetNextWindowSize({320,640}, ImGuiCond_Once);
     ImGui::Begin("Coastal Erosion");
 
     ImGui::Text("Camera : %s  (F pour basculer)",
@@ -82,7 +84,6 @@ void renderUI() {
     ImGui::Checkbox("Erosion pluie", &p.erosion.enabled);
     if (p.erosion.enabled) {
         ImGui::Indent(8.f);
-
         ImGui::TextColored({0.4f,0.8f,1.f,1.f},"[ Pluie ]");
         ImGui::SliderInt  ("Nb gouttes",     &p.erosion.rain.numDroplets,    1000, 100000);
         ImGui::SliderFloat("Erosion",        &p.erosion.rain.erosionRate,    0.01f, 0.3f, "%.2f (faible=lisse)");
@@ -94,9 +95,25 @@ void renderUI() {
         ImGui::TextColored({1.f,0.7f,0.3f,1.f},"[ Thermique ]");
         ImGui::SliderFloat("Angle talus",    &p.erosion.thermal.talusAngle,  15.f,75.f,"%.0f deg");
         ImGui::SliderInt  ("Iterations",     &p.erosion.thermal.iterations,  1, 20);
+        ImGui::Unindent(8.f);
+    }
+    ImGui::Separator();
 
-        float est = p.erosion.rain.numDroplets * p.erosion.rain.maxSteps / 5000000.f;
-        ImGui::TextColored({0.7f,0.7f,0.7f,1.f},"Calcul: ~%.1f sec", est);
+    // ---- Section Arbres ----
+    TreePlacementParams& t = g.treeParams;
+    ImGui::Checkbox("Arbres", &t.enabled);
+    if (t.enabled) {
+        ImGui::Indent(8.f);
+        ImGui::TextColored({0.4f,0.9f,0.4f,1.f}, "[ Foret ] %d arbres", treeCount);
+        ImGui::SliderFloat("Densite",        &t.density,       0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("Distance min",   &t.minDistance,   0.6f, 4.0f, "%.1f");
+        ImGui::SliderFloat("Espacement",     &t.gridSpacing,   1.0f, 4.0f, "%.1f");
+        ImGui::SliderFloat("Hauteur min",    &t.minHeight,     0.5f, 10.f, "%.1f");
+        ImGui::SliderFloat("Hauteur max",    &t.maxHeight,     10.f, 60.f, "%.1f");
+        ImGui::SliderFloat("Pente max (cos)",&t.maxSlopeCos,   0.3f, 0.95f, "%.2f");
+        ImGui::SliderFloat("Echelle min",    &t.minScale,      0.3f, 1.5f, "%.2f");
+        ImGui::SliderFloat("Echelle max",    &t.maxScale,      0.5f, 3.0f, "%.2f");
+        ImGui::SliderFloat("Freq clairieres",&t.densityFreq,   0.005f, 0.15f, "%.3f");
         ImGui::Unindent(8.f);
     }
 
@@ -138,13 +155,27 @@ int main() {
 
     Ocean ocean; ocean.worldSize=200.f; ocean.init();
     IslandScene island; island.init(g.islandParams);
+
+    // --- Initialisation du système d'arbres ---
+    TreeSystem trees; trees.init();
+    trees.generate(island.heights(), island.gridN(),
+                   island.worldSize(), island.seaLevel(),
+                   g.islandParams.seed, g.treeParams);
+
     const glm::vec3 lightDir=glm::normalize(glm::vec3(0.6f,1.f,0.4f));
 
     while(!glfwWindowShouldClose(win)){
         float now=float(glfwGetTime());
         g.deltaTime=now-g.lastFrame; g.lastFrame=now; g.time=now;
         glfwPollEvents(); processKeys(win);
-        if(g.regenerate){island.regenerate(g.islandParams);g.regenerate=false;}
+        if(g.regenerate){
+            island.regenerate(g.islandParams);
+            // Régénérer les arbres avec les nouvelles hauteurs
+            trees.generate(island.heights(), island.gridN(),
+                           island.worldSize(), island.seaLevel(),
+                           g.islandParams.seed, g.treeParams);
+            g.regenerate=false;
+        }
 
         glClearColor(0.52f,0.72f,0.88f,1.f);
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
@@ -155,8 +186,9 @@ int main() {
         glm::vec3 camPos=g.camera.position();
 
         island.draw(view,proj,lightDir,camPos);
-        ocean.draw(view,proj,g.time);
-        renderUI();
+        trees.draw (view,proj,lightDir,camPos);
+        ocean.draw (view,proj,g.time);
+        renderUI(trees.count());
         glfwSwapBuffers(win);
     }
 
