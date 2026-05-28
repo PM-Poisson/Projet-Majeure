@@ -44,7 +44,18 @@ void HydraulicErosion::applyBrush(std::vector<float>& h, int N,
         float delta=amount*(c.w/tw);
         float cur=h[c.idx];
         if(delta>0.0f) {
-            if(cur>seaLevel) h[c.idx]=cur+delta;
+            // Dépôt : autorisé sous l'eau, mais atténué selon la profondeur.
+            // Atténuation linéaire : 100% au niveau de la mer, 0% à -shoreDepth.
+            // Cela crée des plages et des deltas sédimentaires près du rivage,
+            // sans rehausser le fond au large.
+            const float shoreDepth = 4.0f;  // profondeur max de dépôt sous-marin
+            if (cur > seaLevel) {
+                h[c.idx] = cur + delta;
+            } else if (cur > seaLevel - shoreDepth) {
+                float attenuation = (cur - (seaLevel - shoreDepth)) / shoreDepth;
+                h[c.idx] = cur + delta * attenuation;
+            }
+            // Au-delà de shoreDepth : sédiments perdus (trop profond)
         } else {
             if(cur>seaLevel) h[c.idx]=std::max(seaLevel, cur+delta);
         }
@@ -62,7 +73,17 @@ void HydraulicErosion::run(std::vector<float>& heights, int N,
 
         for(int step=0; step<p.maxSteps; ++step) {
             float h0=interpolate(heights,N,x,z);
-            if(h0<=p.seaLevel) break;
+            // Sous l'eau : la goutte dépose progressivement ses sédiments
+            // en continuant à descendre, puis disparaît une fois trop profonde.
+            // Cela crée des accumulations sédimentaires en bord de rivage (plages).
+            if(h0 <= p.seaLevel) {
+                if(sediment > 0.0f) {
+                    // Dépose tout ce qui reste, le pinceau se charge de l'atténuation
+                    applyBrush(heights,N,x,z,sediment,p.brushRadius,p.seaLevel);
+                    sediment = 0.0f;
+                }
+                break;
+            }
 
             auto [gx,gz]=computeGradient(heights,N,x,z);
             dx=dx*p.inertia-gx*(1-p.inertia);

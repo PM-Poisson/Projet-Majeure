@@ -4,9 +4,10 @@
 #include <cstdint>
 
 struct ThermalErosionParams {
-    int   iterations  = 12;
-    float talusAngle  = 35.0f;
+    int   iterations  = 12;      // passes par cycle (moins par cycle, mais plusieurs cycles)
+    float talusAngle  = 30.0f;  // angle de repos (degrés) — abaissé pour île humide/volcanique
     float erosionRate = 0.5f;
+    int   cycles      = 5;      // nombre de cycles pluie→thermique (plus = plus lisse)
 };
 
 struct ErosionParams {

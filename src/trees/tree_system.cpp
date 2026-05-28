@@ -254,7 +254,13 @@ void TreeSystem::generate(const std::vector<float>& heights, int N,
             // (c) Filtre densité (bruit basse fréquence → clairières)
             float dens = densityNoise.warpedFractal2D(
                             wx * p.densityFreq, wz * p.densityFreq, 3, 0.0f);
-            float prob = (dens + 1.0f) * 0.5f * p.density;
+            // Rehaussement du contraste : on décale le bruit vers le bas pour
+            // qu'une large portion (~40%) soit en dessous de zéro → clairière franche.
+            // Puis on applique une puissance pour rendre la transition forêt/clairière
+            // plus abrupte (bordure nette plutôt que dégradé flou).
+            float densShifted = (dens + 1.0f) * 0.5f - p.clearingBias; // décalage vers le bas
+            float densContrast = std::pow(std::max(0.0f, densShifted), p.clearingContrast);
+            float prob = densContrast * p.density;
             if (uni(rng) > prob) continue;
 
             // (d) Distance minimale

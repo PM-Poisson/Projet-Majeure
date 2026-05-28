@@ -9,8 +9,8 @@ struct RainErosionParams {
     float gravity        = 3.0f;
     float evaporation    = 0.008f;
     float capacity       = 8.0f;
-    float erosionRate    = 0.04f;
-    float depositionRate = 0.6f;
+    float erosionRate    = 0.15f;
+    float depositionRate = 0.60f;
     float minSlope       = 0.001f;
     float brushRadius    = 3.0f;
     float seaLevel       = 0.0f;

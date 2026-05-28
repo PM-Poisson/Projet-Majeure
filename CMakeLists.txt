@@ -39,14 +39,14 @@ set(SOURCES
     src/terrain/scene.cpp
 
     src/ocean/ocean.cpp
-    src/ocean/wave.cpp
 
     src/erosion/erosion_system.cpp
     src/erosion/hydraulic_erosion.cpp
 
     src/trees/tree_system.cpp
 
-    src/renderer/renderer.cpp
+    src/fish/fish_system.cpp
+
     src/renderer/shader.cpp
     src/renderer/camera.cpp
     src/renderer/mesh.cpp

@@ -46,7 +46,22 @@ void ErosionSystem::apply(std::vector<float>& heights, int N,
                            float worldSize, const ErosionParams& p,
                            uint32_t seed) {
     if (!p.enabled) return;
-    applyThermal(heights, N, worldSize, p.thermal);
-    HydraulicErosion hydraulic;
-    hydraulic.run(heights, N, worldSize, p.rain, seed);
+
+    // On alterne plusieurs cycles pluie → thermique.
+    // Cela simule le fait que chaque averse déstabilise de nouvelles pentes,
+    // qui s'effondrent ensuite, exposant de nouvelles surfaces à la pluie suivante.
+    // Chaque cycle traite une fraction des gouttes totales pour garder le même
+    // budget de calcul global.
+    const int cycles = p.thermal.cycles;
+    RainErosionParams rainPerCycle = p.rain;
+    rainPerCycle.numDroplets = p.rain.numDroplets / cycles;
+
+    for (int c = 0; c < cycles; ++c) {
+        // Pluie : érode et creuse
+        HydraulicErosion hydraulic;
+        hydraulic.run(heights, N, worldSize, rainPerCycle, seed + c);
+
+        // Thermique : stabilise les pentes rendues instables
+        applyThermal(heights, N, worldSize, p.thermal);
+    }
 }

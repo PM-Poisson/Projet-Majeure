@@ -126,8 +126,8 @@ float NoiseGenerator::warpedFractal2D(float x, float y,
                                        int   octaves,
                                        float warpScale) const {
     // Premiere passe : calcule un vecteur de deformation
-    float warpX = fractal2D(x + 0.0f, y + 0.0f, octaves) * warpScale;
-    float warpY = fractal2D(x + 5.2f, y + 1.3f, octaves) * warpScale;
+    float warpX = fractal2D(x + 0.0f, y + 0.0f, 3) * warpScale;
+    float warpY = fractal2D(x + 5.2f, y + 1.3f, 3) * warpScale;
 
     // Deuxieme passe : evalue le bruit dans l'espace tordu
     return fractal2D(x + warpX, y + warpY, octaves);

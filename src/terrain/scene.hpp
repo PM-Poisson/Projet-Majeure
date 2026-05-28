@@ -13,14 +13,14 @@
 struct IslandParams {
     int   gridN        = 300;
     float worldSize    = 160.0f;
-    float heightScale  = 35.0f;
+    float heightScale  = 30.0f;
     float seaLevel     = 0.0f;
-    float islandRadius = 0.42f;
-    float shoreBlend   = 0.12f;  // valeur médiane : modulée x0.8→x5 selon l'angle
-    float noiseFreq    = 0.003f;
+    float islandRadius = 0.500f;
+    float shoreBlend   = 0.30f;  // valeur médiane : modulée x0.8→x5 selon l'angle
+    float noiseFreq    = 0.0066f;
     int   octaves      = 7;
-    float warpStrength = 1.2f;
-    uint32_t seed      = 42;
+    float warpStrength = 0.900f;
+    uint32_t seed      = 1000;
 
     ErosionParams erosion;
 };

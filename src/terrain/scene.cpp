@@ -8,30 +8,30 @@
 IslandScene::IslandScene() : m_noise(42) {}
 
 // ---------------------------------------------------------------------------
-// Génération des hauteurs — approche "tout bruit"
+// Génération des hauteurs — approche "baseline bathymétrique + bruits"
 //
-// On abandonne les fonctions analytiques (tanh, smoothstep) qui imposaient
-// une structure radiale rigide. À la place :
+// L'ancienne approche faisait croître la profondeur de manière non bornée
+// (`pow(dRel, k)`), ce qui créait un grand cône sous l'eau. Ici on borne :
 //
-//   continentScore(x, z) = bruit_continental(x, z) + (1 - falloff(d))
-//                          └─── forme organique ──┘   └─ boost central ─┘
+//   bathymetricBase(d) = peak  ──────╮
+//                                     ╲
+//                                      ╲   transition smoothstep
+//                                       ╲
+//                       0  ────────────── ╲ ── rivage théorique
+//                                          ╲
+//                                           ╲
+//                    -abyssDepth ──────────── ──────────── (plat au large)
 //
-// Le rivage est l'iso-zéro de continentScore : il émerge naturellement de
-// la forme du bruit, sans aucune contrainte angulaire ou de symétrie. Le
-// seul terme "non-bruit" est le falloff polynomial qui force l'île à être
-// centrée (sinon le terrain serait infini avec des continents au hasard).
-//
-// La hauteur finale = score continental (forme globale)
-//                   + bruit de relief (sur terre uniquement)
-//                   + bruit haute fréquence de rugosité (sur terre)
-//                   + bruit bathymétrique (sous l'eau uniquement)
+// Cette baseline est ensuite :
+//   - déformée horizontalement par un bruit continental → côte organique
+//   - augmentée par un bruit de relief sur la terre
+//   - augmentée par un bruit bathymétrique modeste sous l'eau
 //
 // Caractéristiques émergentes :
-//   - Côte parfaitement organique (forme du bruit continental)
-//   - Falaises et plages mélangées sans variation imposée
-//   - Aucun effet d'horloge (pas de bruit angulaire)
-//   - Pente sous-marine vivante (bathymétrie)
-//   - Pas de grandes surfaces lisses (bruit de rugosité HF)
+//   - Sol sous-marin plat à -abyssDepth (avec du bruit), pas de cône
+//   - Remontée progressive vers l'île via smoothstep
+//   - Côte organique (déformation du d par bruit continental)
+//   - Plus de grandes surfaces lisses (bruit de rugosité HF)
 // ---------------------------------------------------------------------------
 void IslandScene::generateHeights() {
     const int   N = params.gridN;
@@ -40,74 +40,69 @@ void IslandScene::generateHeights() {
     m_heights.resize(N * N);
 
     const float peak           = params.heightScale;
-    const float continentAmp   = peak * 0.60f;
     const float reliefAmp      = peak * 0.55f;
     const float roughnessAmp   = peak * 0.05f;
-    const float bathyAmp       = peak * 0.12f;
+    const float bathyAmp       = peak * 0.08f;          // ~3 unités si peak=35
+    const float abyssDepth     = peak * 0.45f;          // ~16 unités si peak=35
 
-    // Le slider "Abruption falaise" (shoreBlend) pilote l'exposant du falloff.
-    // shoreBlend petit  → exposant grand → côte abrupte (falaises)
-    // shoreBlend grand  → exposant petit → côte douce (plages)
-    // Mapping linéaire sur [0.03, 0.30] → [4.0, 1.2]
-    const float shoreSharpness = std::clamp(
-        4.0f - (params.shoreBlend - 0.03f) / 0.27f * 2.8f,
-        1.2f, 4.0f);
+    const float islandR        = params.islandRadius;
+
+    // shoreBlend pilote la largeur de la transition smoothstep mer↔terre :
+    //   shoreBlend petit  → transition étroite → falaise abrupte
+    //   shoreBlend grand  → transition large   → plage douce
+    const float transitionHalf = islandR * (0.30f + params.shoreBlend * 2.0f);
+    const float tStart = islandR - transitionHalf;
+    const float tRange = 2.0f * transitionHalf;
 
     for (int z = 0; z < N; ++z) {
         for (int x = 0; x < N; ++x) {
             float nx = 2.0f * x / float(N - 1) - 1.0f;
             float nz = 2.0f * z / float(N - 1) - 1.0f;
 
-            float d    = std::sqrt(nx * nx + nz * nz);
-            float dRel = d / params.islandRadius;
+            float d = std::sqrt(nx * nx + nz * nz);
 
-            // === 1. BRUIT CONTINENTAL (forme globale de l'île) ===
-            // Deux échelles superposées → contour à plusieurs niveaux de détail
+            // === 1. DÉFORMATION DU CONTOUR ===
+            // Le rivage suit l'iso-d_eff, donc déformer d_eff par un bruit 2D
+            // produit une côte parfaitement organique (baies, péninsules)
             float continentLF = m_noise.warpedFractal2D(
                 nx * 0.8f + 12.3f, nz * 0.8f - 7.1f, 5, 0.5f);
             float continentMF = m_noise.warpedFractal2D(
                 nx * 1.8f + 5.5f, nz * 1.8f + 8.2f, 3, 0.3f);
             float continent = continentLF * 0.7f + continentMF * 0.3f;
+            float d_eff = d - continent * islandR * 0.25f;
 
-            // === 2. FALLOFF RADIAL POLYNOMIAL ===
-            // Seule expression analytique de la distance. (1 - falloff) :
-            //   d=0       → +1 (boost central)
-            //   d=R       →  0 (rivage théorique, modulé par le bruit)
-            //   d>>R      → très négatif (force la mer en bordure)
-            float falloff = std::pow(std::max(0.0f, dRel), shoreSharpness);
+            // === 2. BASELINE BATHYMÉTRIQUE (BORNÉE) ===
+            // smoothstep(tStart, tStart+tRange, d_eff) : 0 sur l'île, 1 dans les abysses
+            float t = std::clamp((d_eff - tStart) / tRange, 0.0f, 1.0f);
+            t = t * t * (3.0f - 2.0f * t);                // smoothstep cubique
+            float baselineH = peak - (peak + abyssDepth) * t;
+            //   d_eff = tStart     : t=0 → baselineH = peak
+            //   d_eff = tStart+R/2 : t=0.5 → baselineH = (peak - abyssDepth) / 2
+            //   d_eff > tStart+R   : t=1 → baselineH = -abyssDepth (PLATEAU)
 
-            // === 3. SCORE CONTINENTAL ===
-            // Le rivage est exactement l'iso-zéro de cette quantité
-            float continentScore = continent + (1.0f - falloff);
-
-            // === 4. BRUIT DE RELIEF (multi-octaves, contrôlé par l'UI) ===
+            // === 3. BRUITS DE DÉTAIL ===
             float relief = m_noise.warpedFractal2D(
-                nx / (f * 333.0f),
-                nz / (f * 333.0f),
-                params.octaves,
-                params.warpStrength);
+                nx / (f * 333.0f), nz / (f * 333.0f),
+                params.octaves, params.warpStrength);
 
-            // === 5. BRUIT DE RUGOSITÉ HF ===
-            // Faible amplitude, haute fréquence → casse les grandes surfaces
-            // lisses sans dénaturer la silhouette
             float roughness = m_noise.warpedFractal2D(
                 nx * 12.0f + 99.9f, nz * 12.0f - 44.4f, 3, 0.0f);
 
-            // === 6. BRUIT BATHYMÉTRIQUE ===
-            // Canyons et monts sous-marins
             float bathy = m_noise.warpedFractal2D(
                 nx * 2.5f + 33.1f, nz * 2.5f - 25.8f, 3, 0.4f);
 
-            // === 7. COMPOSITION ===
-            // Bornes [0, 1] pour éviter une amplification non bornée du bruit
-            // loin du rivage (sinon la bathy dominerait au large)
-            float onLand = std::clamp( continentScore, 0.0f, 1.0f);
-            float inSea  = std::clamp(-continentScore, 0.0f, 1.0f);
+            // === 4. MASQUES TERRE / MER selon la baseline ===
+            // landiness : 0 dès qu'on est sous le niveau de la mer, 1 dès qu'on
+            // est bien en altitude → le relief ne perturbe pas le bord du rivage
+            float landiness  = std::clamp((baselineH + 2.0f) / (peak * 0.5f),
+                                          0.0f, 1.0f);
+            float oceaniness = 1.0f - landiness;
 
-            float height = continentScore * continentAmp
-                         + relief    * reliefAmp    * onLand
-                         + roughness * roughnessAmp * onLand
-                         + bathy     * bathyAmp     * inSea;
+            // === 5. COMPOSITION ===
+            float height = baselineH
+                         + relief    * reliefAmp    * landiness
+                         + roughness * roughnessAmp * landiness
+                         + bathy     * bathyAmp     * oceaniness;
 
             m_heights[z * N + x] = height;
         }

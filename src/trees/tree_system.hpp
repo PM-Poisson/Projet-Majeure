@@ -17,7 +17,7 @@ struct TreePlacementParams {
     // Filtres biologiques
     float minHeight     = 1.5f;     // au-dessus du rivage (unités monde)
     float maxHeight     = 28.0f;    // sous la zone alpine
-    float maxSlopeCos   = 0.65f;    // composante Y minimale de la normale
+    float maxSlopeCos   = 0.75f;    // composante Y minimale de la normale
                                     // (1=plat, 0=vertical ; ici ≈49° max)
 
     // Échantillonnage
@@ -25,11 +25,15 @@ struct TreePlacementParams {
     float jitterFactor  = 0.65f;    // perturbation aléatoire [0, 1]
     float minDistance   = 1.4f;     // distance minimale entre 2 arbres
     float density       = 0.75f;    // multiplicateur global [0, 1]
-    float densityFreq   = 0.03f;    // fréquence du bruit de clairières
+    float densityFreq      = 0.010f; // fréquence du bruit de clairières (basse = grandes zones)
+    float clearingBias     = 0.15f;  // décalage du bruit vers le bas → plus de clairières
+                                     // 0 = peu de clairières, 0.5 = moitié forêt/moitié clairière
+    float clearingContrast = 1.5f;   // puissance du contraste → bordures forêt/clairière nettes
+                                     // 1 = dégradé flou, 3+ = transition très abrupte
 
     // Variation visuelle
-    float minScale      = 0.7f;
-    float maxScale      = 1.6f;
+    float minScale      = 1.0f;
+    float maxScale      = 2.2f;
 };
 
 struct TreeInstance {
